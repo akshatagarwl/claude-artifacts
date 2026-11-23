@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { auth } from "./auth.js";
-import { artifactId, frameRequest } from "./api.js";
+import { artifactId, artifactReadPath, frameRequest } from "./api.js";
 import { prepareWebsite } from "./build.js";
 import { readSettings, updateSettings } from "./settings.js";
 import { websiteManifest, maxDeployBytes } from "./website.js";
@@ -336,7 +336,7 @@ const updateCommand = defineCommand({
 
 const readCommand = defineCommand({
   name: "read",
-  description: "Read a Claude Code artifact from the Claude frame API.",
+  description: "Read a Claude Code or shared chat artifact from the Claude frame API.",
   scope: ["cli", "mcp", "sdk"],
   positional: ["artifact"],
   params: S.Object({
@@ -346,7 +346,8 @@ const readCommand = defineCommand({
   }),
   handler: async ({ params }) => {
     const id = await projectArtifact(params);
-    const response = await frameRequest("GET", `/api/frame/${id}${params.contentVersion === undefined ? "" : `?ver=${encodeURIComponent(params.contentVersion)}`}`, undefined);
+    const path = artifactReadPath(params.artifact ?? id, params.contentVersion);
+    const response = await frameRequest("GET", path, undefined);
     if (params.contentVersion !== undefined && response.ver !== params.contentVersion) throw new Error("The server did not return the requested version.");
     const metadata = artifactMetadata(id, response);
     if (params.content !== true) return metadata;
