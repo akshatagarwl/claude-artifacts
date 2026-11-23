@@ -1,16 +1,15 @@
+import { createTranslator } from "short-uuid";
 import { auth } from "./auth.js";
 
 const artifactIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const base58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const shortIds = createTranslator("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
 
 function decodeShortId(value) {
-  if (!/^[1-9A-HJ-NP-Za-km-z]{22}$/.test(value)) return;
-  let number = 0n;
-  for (const character of value) number = number * 58n + BigInt(base58.indexOf(character));
-  if (number >= 1n << 128n) return;
-  const hex = number.toString(16).padStart(32, "0");
-  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
+  if (!shortIds.validate(value)) return;
+  const id = shortIds.toUUID(value);
+  // Reject encodings outside the UUID range instead of silently truncating them.
+  if (shortIds.fromUUID(id) === value) return id;
 }
 
 function artifactUrl(value) {
@@ -20,29 +19,33 @@ function artifactUrl(value) {
   } catch {}
 }
 
-export function artifactId(value) {
-  if (artifactIdPattern.test(value)) return value.toLowerCase();
-  const shortId = decodeShortId(value);
-  if (shortId) return shortId;
+function artifactReference(value) {
   const url = artifactUrl(value);
   const match = url && /^\/(?:code\/)?artifact\/([^/]+)\/?$/.exec(url.pathname);
-  const id = match?.[1];
-  if (id && artifactIdPattern.test(id)) return id.toLowerCase();
-  const decoded = id && decodeShortId(id);
-  if (decoded) return decoded;
-  throw new Error("Expected a Claude artifact UUID or https://claude.ai/[code/]artifact/<id> URL.");
-}
+  const candidate = match?.[1] ?? value;
+  const id = artifactIdPattern.test(candidate) ? candidate.toLowerCase() : decodeShortId(candidate);
+  if (!id) throw new Error("Expected a Claude artifact UUID or https://claude.ai/[code/]artifact/<id> URL.");
 
-export function artifactReadPath(value, version) {
-  const id = artifactId(value);
   const query = new URLSearchParams();
-  const key = artifactUrl(value)?.searchParams.get("sk");
+  const key = url?.searchParams.get("sk");
   if (key !== null && key !== undefined) {
     if (!/^[A-Za-z0-9_-]{16,64}$/.test(key)) throw new Error("Invalid artifact share key.");
     query.set("sk", key);
   }
+  return { id, query };
+}
+
+export function artifactId(value) {
+  return artifactReference(value).id;
+}
+
+export async function readArtifactFrame(value, version) {
+  const { id, query } = artifactReference(value);
   if (version !== undefined) query.set("ver", version);
-  return `/api/frame/${id}${query.size ? `?${query}` : ""}`;
+  const path = `/api/frame/${id}${query.size ? `?${query}` : ""}`;
+  const response = await frameRequest("GET", path);
+  if (version !== undefined && response.ver !== version) throw new Error("The server did not return the requested version.");
+  return { id, response };
 }
 
 function artifactsApiBaseUrl() {

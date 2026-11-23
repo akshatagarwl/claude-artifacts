@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { auth } from "./auth.js";
-import { artifactId, artifactReadPath, frameRequest } from "./api.js";
+import { artifactId, readArtifactFrame, frameRequest } from "./api.js";
 import { prepareWebsite } from "./build.js";
 import { readSettings, updateSettings } from "./settings.js";
 import { websiteManifest, maxDeployBytes } from "./website.js";
@@ -345,10 +345,8 @@ const readCommand = defineCommand({
     contentVersion: S.Optional(S.String({ description: "Artifact version to fetch when content is included." })),
   }),
   handler: async ({ params }) => {
-    const id = await projectArtifact(params);
-    const path = artifactReadPath(params.artifact ?? id, params.contentVersion);
-    const response = await frameRequest("GET", path, undefined);
-    if (params.contentVersion !== undefined && response.ver !== params.contentVersion) throw new Error("The server did not return the requested version.");
+    const reference = params.artifact ?? await projectArtifact(params);
+    const { id, response } = await readArtifactFrame(reference, params.contentVersion);
     const metadata = artifactMetadata(id, response);
     if (params.content !== true) return metadata;
     const version = params.contentVersion ?? response["ver"];
